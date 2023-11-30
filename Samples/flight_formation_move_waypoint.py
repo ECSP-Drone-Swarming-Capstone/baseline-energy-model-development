@@ -125,7 +125,6 @@ class ShapeController:
             self.airsim_client.takeoffAsync(vehicle_name=drone_name).join()
         
 
-
     def shape_controller(self):
         
         # Create a Matplotlib figure for visualization

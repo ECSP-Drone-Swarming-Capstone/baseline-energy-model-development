@@ -9,6 +9,8 @@ import swarm_controller as sc
 
 class Main:
     
+    # Controls Print Debug Statements 
+    DEBUG = True
 
     def __init__(self, swarm_config_file_path):
         ''' 
@@ -36,11 +38,8 @@ class Main:
         # Initialize Decision Making
 
         # Initialize Controller
-        swarm_controller = sc(self.airsim_client, self.swarm_drone_names, self.swarm_size)
+        self.formation_controller = sc(self.airsim_client, self.swarm_drone_names, self.swarm_size)
         
-
-        
-
 
     def airsim_setup(self):
         """
@@ -58,4 +57,9 @@ class Main:
         for drone in self.swarm_drone_names:
             self.airsim_client.enableApiControl(True, drone)
             self.airsim_client.armDisarm(True, drone)
+    
+
+    def main_loop(self):
+        # Loop begins
+        while True:
             

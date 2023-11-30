@@ -7,6 +7,7 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
+from pyorca import Agent, get_avoidance_velocity, orca, normalized, perp
 
 
 class DecisionMaker:
@@ -171,7 +172,7 @@ class CollisionAvoidance:
             position = self.get_pose_position(pose)
             position_matrix.append(position)
         position_matrix = np.array(position_matrix)
-        # print(position_matrix)
+        print(position_matrix)
         return position_matrix
         
 
@@ -274,6 +275,37 @@ class CollisionAvoidance:
                         potential_collisions.append((drone1, drone2))
         return potential_collisions
     
+    
+    def collision_avoidance_new_velocities(self, control_signal, current_position):
+        # Get Data For Agents
+        agents = []
+        max_speed = 15 # m/s
+        radius = 1 # meter
+        print("Collision Avoidance Values")
+        self.get_drone_velocity
+        for index, drone_name in enumerate(self.drone_names_list):
+            curr_position = (current_position[index][0], current_position[index][1])
+            drone_velocity = self.get_drone_velocity(drone_name)
+            curr_velocity = (drone_velocity[0], drone_velocity[1])
+            pref_velocity = (control_signal[index][0], control_signal[index][1])
+            agents.append( Agent(curr_position, curr_velocity, radius, max_speed, pref_velocity) )
+            print("Position:", curr_position, 
+                  "\nVelocity", curr_velocity,
+                  "\nPrefered Velocity", pref_velocity,
+                  "\nDrone Name", drone_name
+                  )
+        dt = 1
+        tau = 1
+        new_vels = [None] * len(agents)
+        for i, agent in enumerate(agents):
+            candidates = agents[:i] + agents[i + 1:]
+            print("Candidates:", candidates)
+            new_vels[i], _ = orca(agent, candidates, tau, dt)
+            new_vels[i] = np.append(new_vels[i], [control_signal[index][2]])
+            
+            print("New Velocity", new_vels)
+        return new_vels
+         
 
     def shape_controller(self):
         
@@ -320,8 +352,10 @@ class CollisionAvoidance:
             control_signal = (gain_P * tau_dot) + (centroid_gain_P * centroid_error) 
             print("control_signal:", control_signal)
 
+            # Collision Avoidance
+            new_control_signals = self.collision_avoidance_new_velocities(control_signal, position)
             # Motion Control
-            self.drone_motion_control(control_signal)
+            self.drone_motion_control(new_control_signals)
             
             iteration = iteration + 1
             plt.clf()

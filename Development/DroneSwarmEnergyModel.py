@@ -1,7 +1,9 @@
+from email.policy import default
 import numpy as np
 # import matplotlib.pyplot as plt
 import geopy.distance
 from math import pi, sqrt, pow, atan2, asin, sin, cos
+import sympy as sp
 
 
 class DroneSwarmPowerModel:
@@ -127,8 +129,36 @@ class DroneSwarmPowerModel:
         roll_x_rad, pitch_y_rad, yaw_z_rad = self.euler_from_quaternion(x, y, z, w) # radians
         roll_x_deg, pitch_y_deg, yaw_z_deg = np.rad2deg(roll_x_rad), np.rad2deg(pitch_y_rad), np.rad2deg(yaw_z_rad) # degrees
         return {"radians": [roll_x_rad, pitch_y_rad, yaw_z_rad], "degrees": [roll_x_deg, pitch_y_deg, yaw_z_deg]}
-        
     
+
+    def calc_Vi(self, v_inf, alpha, T, omega, r, rho, A):
+        """
+        Induced velocity calculator for a single rotor
+        Parameters
+        ----------
+        v_inf : float
+            Airspeed [m/s]
+        alpha : math.radians
+            Blade angle of attack [deg] (the same value of drone angle of attack, for simplicity)
+        T : float
+            Rotor thrust [N]
+        omega : float
+            Rotational speed of rotor [rad/s]
+        r :float
+            Rotor radius [m]
+        rho : float
+            Air density [kg/m3]
+        A : float
+            Single rotor circle area depicted by the propeller rotation [m2]
+        """
+        v_i = sp.symbols('v_i')
+        lambda_h = np.sqrt(T/(2*rho*A))
+        mu = (v_inf*np.cos(alpha))/(omega*r)
+        eq = v_i ** 4 + lambda_h * v_i ** 2 + 0.25 * (pow(mu,2) * pow(lambda_h,2) - pow(lambda_h,4)) - pow(lambda_h,4)
+        roots = [x for x in sp.solve(eq,v_i) if x.is_real == True and x > 0]
+        return roots[0] - v_inf * np.sin(alpha)
+    
+
     def get_induced_velocity(self, drone):
         """
         Calculates the induced velocity of the drone, which differs based on its flight mode.
@@ -136,21 +166,27 @@ class DroneSwarmPowerModel:
         :param drone: The drone name for which induced velocity is being calculated.
         :return: The induced velocity of the drone in meters per second (m/s).
         """
+        
+        # Get Common Varaibles
+        thrust = self.get_net_thrust(drone)
+        air_density = self.airsim_state[drone]["AirDensity"] # kg/m^3
         # Calculate induced velocity when hovering
         if self.drone_flight_mode == "Hover":
             # velocity_induced = sqrt( Thrust / 2 * air_density * A (Total Area Covered By Propellers) )
             # A = M * pi * R^2 
             # M is nuber of propellers
             # R is radius of propellers
-            thrust = self.get_net_thrust(drone)
-            air_density = self.airsim_state[drone]["AirDensity"] # kg/m^3
             velocity_induced = sqrt( thrust / (2 * air_density * self.A) ) # meters per second (m/s)
             return velocity_induced
         elif self.drone_flight_mode == "Flight":
             # Induced velocity we can represent as the ground velocity of the drone while in flight.
-            velocity_induced = self.get_drone_velocity(drone) # m/s
+            air_speed = self.get_air_speed(drone)
+            orientation = self.get_drone_orientation(drone)
+            alpha = orientation['radians'][1] # gets pitch aka angle of attack radians
+            thrust = self.get_net_thrust(drone) # N = Kg * m/s^2
+            velocity_induced = self.calc_Vi(air_speed, alpha, T, omega, r, rho, A) # m/s
             return velocity_induced
-            #thrust = self.get_net_thrust(drone) # N = Kg * m/s^2
+            
             #prop_area = self.A # m^2
             #orientation = self.get_drone_orientation(drone)
             #alpha = orientation['radians'][1] # gets pitch aka angle of attack radians
@@ -343,6 +379,13 @@ class DroneSwarmPowerModel:
         :return: The equivalent linear speed in meters per second.
         """
         return self.R * ((2 * pi)/60) * rpm
+    
+
+    def mps_to_radians_per_sec(self, mps):
+        """
+        Converts meters per second to radians per second
+        """
+        return (mps/self.R)
 
 
     def euler_from_quaternion(self, x, y, z, w):
