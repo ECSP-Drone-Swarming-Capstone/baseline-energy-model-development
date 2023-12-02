@@ -735,7 +735,7 @@ class WindModel:
         # Getting velocity data needed to find direction 
         wind = self.wind_vector # (NED)
         drone_data[drone_name] 
-        kinematics = self.airsim_state[drone_name]['MultiRotorState'].kinematics_estimated
+        kinematics = drone_data[drone_name]['MultiRotorState'].kinematics_estimated
         drone_velocity = np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
         # computing wind direction
         wind_direction = self.calculate_relative_wind_direction(wind, drone_velocity)
@@ -746,12 +746,12 @@ class WindModel:
         # Getting velocity data needed to find direction 
         wind = self.wind_vector # (NED)
         
-        mean_velocity = np.array([0,0,0])
+        mean_velocity = np.array([0.0,0.0,0.0])
         drone_list_length = len(drone_names_list)
         for drone_name in drone_names_list:
             drone_data[drone_name] 
-            kinematics = self.airsim_state[drone_name]['MultiRotorState'].kinematics_estimated
-            drone_velocity += np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
+            kinematics = drone_data[drone_name]['MultiRotorState'].kinematics_estimated
+            mean_velocity += np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
         # Compute Mean
         swarm_mean_velocity = mean_velocity/drone_list_length
         # computing wind direction
@@ -780,7 +780,7 @@ class QuadController:
         # Setup Environment Parameters
         self.airsim_setup()
         self.initial_position = np.array([])
-        wind_vector = [0,10,0] #(NED), East (0,1,0), North (1,0,0), West (0,-1,0), South (-1, 0, 0)
+        wind_vector = [0,-1,0] #(NED), East (0,1,0), North (1,0,0), West (0,-1,0), South (-1, 0, 0)
         # self.wind_direction = "East+" 
         self.wind = WindModel(wind_vector)
     
@@ -927,7 +927,7 @@ class QuadController:
         #power_calculation_thread = Thread(target=dpm.power_model, args=("Flight", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data))
         #power_calculation_thread.start()
         #power_usage = dpm.swarm_power_consumption_model("Hover", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data)
-        direction_drone_wind = self.wind.get_direction_wind_to_drone("Drone1", copied_airsim_state_data)
+        direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", copied_airsim_state_data)
         direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, copied_airsim_state_data)
         wind_vector = self.wind.get_wind_vector()
         power_usage = dpm.drone_power_consumption_model("Hover", wind_vector, direction_drone_wind, "Drone1", copied_airsim_state_data)
