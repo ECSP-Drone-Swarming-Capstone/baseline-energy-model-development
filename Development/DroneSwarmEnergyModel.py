@@ -183,36 +183,20 @@ class DroneSwarmPowerModel:
             air_speed = self.get_air_speed(drone)
             orientation = self.get_drone_orientation(drone)
             alpha = orientation['radians'][1] # gets pitch aka angle of attack radians
-            thrust = self.get_net_thrust(drone) # N = Kg * m/s^2
-            velocity_induced = self.calc_Vi(air_speed, alpha, T, omega, r, rho, A) # m/s
+            mean_thrust = thrust/4
+            rotor_speed = self.get_angular_speed(drone)
+            mean_rotor_speed = np.mean(rotor_speed)
+            mean_rotor_speed_rps = self.mps_to_radians_per_sec(mean_rotor_speed)
+            velocity_induced = self.calc_Vi(air_speed, alpha, mean_thrust, mean_rotor_speed_rps, self.R, air_density, 4*self.A) # m/s
+            if DroneSwarmPowerModel.DEBUG:
+                print("Induced Velocity Calculation:\n", 
+                        "\nAir Speed (m/s):", air_speed,
+                        "\nAlpha (radians):", alpha,
+                        "\nMean Thrust:", mean_thrust,
+                        "\nMean Rotor Speed (rps)", mean_rotor_speed_rps,
+                        "\nVelocity Induced", velocity_induced,
+                        )
             return velocity_induced
-            
-            #prop_area = self.A # m^2
-            #orientation = self.get_drone_orientation(drone)
-            #alpha = orientation['radians'][1] # gets pitch aka angle of attack radians
-            #beta = orientation['radians'][2] # gets yaw aka beta/steering angle randians
-            #air_density = self.airsim_state[drone]["AirDensity"] # self.airsim_client.simGetGroundTruthEnvironment(drone).air_density
-            #numerator = thrust/(2 * air_density * prop_area)
-            #velocity_air = self.get_velocity_air(drone) # m/s
-            #projection_jk = sqrt( ( pow(sin(alpha), 2) * pow(sin(beta), 2) - pow(sin(beta), 2) ) / (pow(sin(alpha), 2) * pow(sin(beta), 2) - 1) )
-            #projection_ij = sqrt( ( pow(sin(alpha), 2) * pow(sin(beta), 2) - pow(sin(alpha), 2) ) / (pow(sin(alpha), 2) * pow(sin(beta), 2) - 1) )
-            #projection_ik = ( cos(alpha) * cos(beta) ) / sqrt( pow(sin(alpha), 2) * pow(cos(beta), 2) + pow(cos(alpha), 2) )  
-            #denom_term1 = (velocity_air * projection_jk)**2
-            #denom_term2 = (velocity_air * projection_ik)**2
-            #denom_term3_part1 = velocity_air * projection_ij
-            #velocity_induced_hover = sqrt( thrust / (2 * air_density * self.A) ) # m/s # TODO: Assumption that  velocity induced would be a good enough approximation
-            #velocity_induced_flight = numerator / sqrt( denom_term1 + denom_term2 + (denom_term3_part1 + velocity_induced_hover)**2 ) 
-            #return velocity_induced_flight # m/s
-        
-
-    #def get_wind_heading(self):
-    #    """ 
-    #        Returns Direction relative to drone in the swarm 
-    #    """        
-    #    n,e,d = self.wind_vector
-    #    wind_direction = atan2(e, n)
-    #    orientation = self.get_drone_orientation(drone)
-    #    beta = orientation['radians'][2] # gets yaw aka beta/steering/heading angle randians
         
         
     def get_swarm_parasitic_power_consumption(self):
@@ -223,12 +207,14 @@ class DroneSwarmPowerModel:
         """
         
         wind_speed = np.linalg.norm(self.wind_vector)
-        wind_direction = self.wind_direction # East+, North+, North-
+        wind_direction = self.wind_direction # N, E, S, W - Cardinal Directions
         # Assigns sign of wind direction
         wind_velocity = wind_speed
-        if wind_direction == "North-":
+        if wind_direction == "W":
             wind_velocity = -1 * wind_speed
-        
+        elif wind_direction == "S":
+            wind_velocity = 0 * wind_speed
+
         if DroneSwarmPowerModel.DEBUG:
             print("Parasitic Power (Flight Mode) Pt2: ", 
                     "\nWind Speed (m/s):", wind_speed,
@@ -242,52 +228,47 @@ class DroneSwarmPowerModel:
             a_x , b_x, c_x, d_x = (0.04992735, -0.03668969, 4.85183825, 2.86950829)
             # Quadratic stimation for power-z
             a_z , b_z, c_z = (0.53830656, -3.10909162,  4.6096633)
-            if wind_direction == "East+":
-                return self.quadratic(wind_velocity, a_z , b_z, c_z)
-            else:
+            if wind_direction == "W" or wind_direction == "E":
                 return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
+            else:
+                return self.quadratic(wind_velocity, a_z , b_z, c_z)
         elif self.formation == "Echelon":
             # Cubic estimation of power-x
             a_x , b_x, c_x, d_x = (0.06068811, -0.06580198, 4.25524982, 1.32457763)
             # Quadratic stimation for power-z
             a_z , b_z, c_z = (0.74663132, -4.73078804, 6.92984925)
-            if wind_direction == "East+":
-                return self.quadratic(wind_velocity, a_z , b_z, c_z)
-            else:
+            if wind_direction == "W" or wind_direction == "E":
                 return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
-    
+            else:
+                return self.quadratic(wind_velocity, a_z , b_z, c_z)
+        elif self.formation == "Column":
+            # Cubic estimation of power-x
+            a_x , b_x, c_x, d_x = (0.04591221, -0.00451343,  1.36092396, -0.24269214)
+            # Quadratic stimation for power-z
+            a_z , b_z, c_z = (0.55367928, -2.25427749,  3.68723189)
+            if wind_direction == "W" or wind_direction == "E":
+                return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
+            else:
+                return self.quadratic(wind_velocity, a_z , b_z, c_z )
+        elif self.formation == "Front":
+            # Cubic estimation of power-x
+            a_x , b_x, c_x, d_x = (0.03644207, -0.00831357,  1.32394737, -0.34071768)
+            # Quadratic stimation for power-z
+            a_z , b_z, c_z = (0.69623598, -4.36917437,  6.34302308)
+            if wind_direction == "W" or wind_direction == "E":
+                return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
+            else:
+                return self.quadratic(wind_velocity, a_z , b_z, c_z)
+        elif self.formation == "Diamond":
+            # Cubic estimation of power-x
+            a_x , b_x, c_x, d_x = (0.02903825, -0.02000249,  0.05777605,  0.52897958)
+            # Quadratic stimation for power-z
+            a_z , b_z, c_z = (0.72696461, -3.91278085, 6.23165963)
+            if wind_direction == "W" or wind_direction == "E":
+                return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
+            else:
+                return self.quadratic(wind_velocity, a_z , b_z, c_z)
 
-    def get_drag_force(self):
-        """
-        Calculates the drag force experienced by the drone swarm, based on its formation and wind vector.
-        The drag force on the swarm is estimated using cubic and quadratic estimations from solid works drag simulations.
-        :return: The drag force experienced by the drone in Newtons.
-        """
-        wind_speed = np.linalg.norm(self.wind_vector)
-        wind_direction = "Front" # Front, Left, Right we need a function that returns this
-        # Assigns sign of wind direction
-        wind_velocity = wind_speed
-        if wind_direction == "Left":
-            wind_velocity = -1 * wind_speed
-            
-        if self.formation == "Vee":
-            # Cubic estimation of drag-x
-            a_x , b_x, c_x, d_x = (0.00118268, -0.00188352, 0.71607042, 0.17407187)
-            # Quadratic stimation for drag-z
-            a_z , b_z, c_z = (0.0291959, 0.05643199, -0.07195437)
-            if wind_direction == "Front":
-                return self.quadratic(wind_velocity, a_z , b_z, c_z)
-            else:
-                return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
-        elif self.formation == "Echelon":
-            # Cubic estimation of drag-x
-            a_x , b_x, c_x, d_x = (0.0018127, -0.00320426, 0.67314954, 0.07652908)
-            # Quadratic stimation for drag-z
-            a_z , b_z, c_z = (0.0405097677, -0.0111972537, -0.00000343289225)
-            if wind_direction == "Front":
-                return self.quadratic(wind_velocity, a_z , b_z, c_z)
-            else:
-                return self.cubic(wind_velocity, a_x , b_x, c_x, d_x)
 
     ####################
     # Setter Functions #
@@ -612,7 +593,7 @@ class DroneSwarmPowerModel:
                           )
                 return parasitic_power
         elif mode == "Single Drone":
-            if self.drone_flight_mode == "Hover":
+            if self.drone_flight_mode == "Hover" or self.drone_flight_mode == "Flight":
                 # Formula: F_Drag * Air_velocity = 0.5 * Coef_drag * air_density * A_ref * Air_velocity^3
                 coef_drag = 1.139 # TODO Follow up and verify this is good
                 air_density = self.airsim_state[drone_name]["AirDensity"]
@@ -620,7 +601,7 @@ class DroneSwarmPowerModel:
                 velocity_air = self.get_air_speed(drone_name)
                 parasitic_power = 0.5 * coef_drag * air_density * A_ref * pow(velocity_air, 3)
                 if DroneSwarmPowerModel.DEBUG:
-                    print("Parasitic Power (Single Drone Hover Mode):",
+                    print("Parasitic Power (Single Drone Hover/Flight Mode):",
                           "\nDrone:", drone_name,
                           "\nAir Velocity (m/s):", velocity_air,
                           "Air Density (kg/m^3):", air_density,
@@ -629,17 +610,6 @@ class DroneSwarmPowerModel:
                           "\nNet Parasitic Power (W):", parasitic_power, "\n"
                           )
                 return parasitic_power
-            elif self.drone_flight_mode == "Flight":
-                # Formula: F_Drag * Air_velocity = 0.5 * Coef_drag * air_density * A_ref * Air_velocity^3
-                # We use a polynomial function that fits the data collected of the drone swarm to get the formula results above
-                # parasitic_power = self.get_parasitic_power()
-                # if DronePowerModel.DEBUG:
-                #    print("Parasitic Power (Swarm Flight Mode): ", 
-                #          "\nParasitic Power (W):", parasitic_power, "\n"
-                #          )
-                # return parasitic_power
-                # TODO Implement
-                pass
 
 
     def drone_power_consumption_model(self, operation_mode, wind_vector, wind_direction, drone, airsim_state):
