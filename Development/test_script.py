@@ -13,6 +13,7 @@ from DroneSwarmEnergyModel import DroneSwarmPowerModel
 class QuadController:
     """ Utilized to collect data on quadcopter dynamics """
     
+    DEBUG = True
 
     def __init__(self):
         # Drone Information
@@ -154,6 +155,29 @@ class QuadController:
         return drone_state_dict            
 
 
+    def detect_swarm_mode_of_flight(self, drone_data):
+        mean_velocity = np.array([0.0,0.0,0.0])
+        drone_list_length = len(self.drone_names_list)
+        for drone_name in self.drone_names_list:
+            drone_data[drone_name] 
+            kinematics = drone_data[drone_name]['MultiRotorState'].kinematics_estimated
+            mean_velocity += np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
+        mean_velocity = mean_velocity/drone_list_length
+        
+        if QuadController.DEBUG:
+            print(
+                "Flight Mode",
+                "\nMean Velocity:", mean_velocity
+            )
+
+        # Check the mode of flight the drones are in
+        # if North (x), East (y) average is less than 0.15 m/s then we say we are hovering, we could also add position has not changed a lot as well
+        if abs(mean_velocity[0]) == 0 and abs(mean_velocity[1]) == 0:
+            return "Hover"
+        else:
+            return "Flight"
+    
+
     def drone_data_collection(self):
         """ Prints out data to the console of Drone1. """
         #drone_name = "Drone1"
@@ -170,8 +194,15 @@ class QuadController:
         #power_usage = dpm.swarm_power_consumption_model("Hover", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data)
         direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", copied_airsim_state_data)
         direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, copied_airsim_state_data)
+        mode_of_flight = self.detect_swarm_mode_of_flight(copied_airsim_state_data)
         wind_vector = self.wind.get_wind_vector()
-        power_usage = dpm.drone_power_consumption_model("Hover", wind_vector, direction_drone_wind, "Drone1", copied_airsim_state_data)
+        
+        power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, "Drone1", copied_airsim_state_data)
+        if QuadController.DEBUG:
+            print("Data Collection",
+                  "\nWind Direction:", direction_drone_wind,
+                  "\nMode of Flight:", mode_of_flight,
+                )
         return power_usage
         #print("MultiRotor State Information:", multirotor_state)
         #print("************************************************\n")
@@ -214,7 +245,7 @@ class QuadController:
         """Assigns a set velocity for the drones to reach their desired destination. """
         #for index, drone_name in enumerate(self.drone_names_list):
         drone_name = "Drone1"
-        self.airsim_client.moveByVelocityAsync(0, 0, altitude_control_signal[0], 0.1, vehicle_name=drone_name) # not working
+        self.airsim_client.moveByVelocityAsync(17, 0, altitude_control_signal[0], 0.1, vehicle_name=drone_name) # not working
         
         #worker_thread = Thread(target=self.drone_data_collection)
         #worker_thread.start()
