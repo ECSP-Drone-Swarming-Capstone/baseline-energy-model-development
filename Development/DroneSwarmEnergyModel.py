@@ -187,7 +187,7 @@ class DroneSwarmPowerModel:
             rotor_speed = self.get_angular_speed(drone)
             mean_rotor_speed = np.mean(rotor_speed)
             mean_rotor_speed_rps = self.mps_to_radians_per_sec(mean_rotor_speed)
-            velocity_induced = self.calc_Vi(air_speed, alpha, mean_thrust, mean_rotor_speed_rps, self.R, air_density, 4*self.A) # m/s
+            velocity_induced = self.calc_Vi(air_speed, alpha, mean_thrust, mean_rotor_speed_rps, self.R, air_density, self.A) # m/s
             if DroneSwarmPowerModel.DEBUG:
                 print("Induced Velocity Calculation:\n", 
                         "\nAir Speed (m/s):", air_speed,

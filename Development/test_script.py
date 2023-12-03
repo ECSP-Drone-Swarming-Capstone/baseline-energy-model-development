@@ -3,7 +3,10 @@ import setup_path
 import airsim
 import numpy as np
 import time
+from datetime import datetime
 import matplotlib.pyplot as plt
+import csv
+from threading import Thread
 
 from wind_model import WindModel
 from DroneSwarmEnergyModel import DroneSwarmPowerModel 
@@ -33,6 +36,7 @@ class QuadController:
         """
         # start drone client
         self.airsim_client = airsim.MultirotorClient()
+        self.airsim_data_collection_client = airsim.MultirotorClient()
         # Check connectivity
 
         self.airsim_client.confirmConnection()   
@@ -142,10 +146,10 @@ class QuadController:
         air_density = None        
         drone_state_dict = {}
         for drone in self.drone_names_list:
-            multirotor_state = self.airsim_client.getMultirotorState(vehicle_name=drone)
-            rotor_state_info = self.airsim_client.getRotorStates(vehicle_name=drone)
-            drone_pose_WFNED = self.airsim_client.simGetObjectPose(drone)
-            air_density = self.airsim_client.simGetGroundTruthEnvironment(drone).air_density
+            multirotor_state = self.airsim_data_collection_client.getMultirotorState(vehicle_name=drone)
+            rotor_state_info = self.airsim_data_collection_client.getRotorStates(vehicle_name=drone)
+            drone_pose_WFNED = self.airsim_data_collection_client.simGetObjectPose(drone)
+            air_density = self.airsim_data_collection_client.simGetGroundTruthEnvironment(drone).air_density
             drone_state_dict[drone] = {
                                         "MultiRotorState": multirotor_state,
                                         "RotorState": rotor_state_info,
@@ -178,32 +182,22 @@ class QuadController:
             return "Flight"
     
 
-    def drone_data_collection(self):
-        """ Prints out data to the console of Drone1. """
+   # def drone_data_collection(self):
+    #    """ Prints out data to the console of Drone1. """
         #drone_name = "Drone1"
         #multirotor_state = self.airsim_client.getMultirotorState(vehicle_name=drone_name)
         #rotor_state_info = self.airsim_client.getRotorStates(vehicle_name=drone_name)
         #drone_pose_WFNED = self.airsim_client.simGetObjectPose(drone_name)
         
-        dpm = DroneSwarmPowerModel()
+        
         # This Power Calculation should be executed once a second
-        copied_airsim_state_data = self.copy_drone_swarm_data()
+        #copied_airsim_state_data = self.copy_drone_swarm_data()
         # State: Hover or Flight
         #power_calculation_thread = Thread(target=dpm.power_model, args=("Flight", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data))
         #power_calculation_thread.start()
         #power_usage = dpm.swarm_power_consumption_model("Hover", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data)
-        direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", copied_airsim_state_data)
-        direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, copied_airsim_state_data)
-        mode_of_flight = self.detect_swarm_mode_of_flight(copied_airsim_state_data)
-        wind_vector = self.wind.get_wind_vector()
-        
-        power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, "Drone1", copied_airsim_state_data)
-        if QuadController.DEBUG:
-            print("Data Collection",
-                  "\nWind Direction:", direction_drone_wind,
-                  "\nMode of Flight:", mode_of_flight,
-                )
-        return power_usage
+       
+        #return power_usage
         #print("MultiRotor State Information:", multirotor_state)
         #print("************************************************\n")
         #print("Rotor State Information:", rotor_state_info, "\n")
@@ -213,29 +207,47 @@ class QuadController:
         # print("Drone Energy Usage in Watts", power_usage, "\n")
         #print("**********************************************************")
    
-    # ################## #
-    # Plotting Functions #
-    # ################## #
-    def update_plot(self, x, y1, y2):
-        """
-            Updates plots
-        """
-        # , self.position_data, self.power_data
-        self.iteration_time_step.append(x)
-        self.position_data.append(y1)
-        self.power_data.append(y2)
-        self.line1.set_data(self.iteration_time_step, self.position_data)
-        self.line2.set_data(self.iteration_time_step, self.power_data)
+    
+    def save_data_to_csv(self):
+        # Get current date and time
+        current_time = datetime.now()
+        # Format the time in a file-friendly format (e.g., '2023-03-21_15-30-00')
+        timestamp = current_time.strftime('%Y-%m-%d_%H-%M-%S')
+        filename = f'data_log_{timestamp}.csv'
+        dpm = DroneSwarmPowerModel()
+        try:
+            while True:
+                with open(filename, 'a+', newline='') as file:
+                    writer = csv.writer(file)
+                    if file.tell() == 0:
+                        writer.writerow(['Time', 'Power (Watts)', 'Flight Mode', 'Wind Speed (m/s)', 'Wind Direction (NESW)', 'Velocity m/s'])  # Writing header
+            
+                    # Data collection
+                    current_time = time.time()
+                    drone_data = self.copy_drone_swarm_data()
+                
+                    kinematics = drone_data["Drone1"]['MultiRotorState'].kinematics_estimated
+                    velocity_drone_vector = np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
+                    speed_drone = np.linalg.norm(velocity_drone_vector)
+                    direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", drone_data)
+                    # direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, drone_data)
+                    mode_of_flight = self.detect_swarm_mode_of_flight(drone_data)
+                    wind_vector = self.wind.get_wind_vector()
+                    wind_speed = np.linalg.norm(wind_vector)
+                    power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, "Drone1", drone_data)
+                
+                    # Record Data
+                    writer.writerow([current_time, power_usage, mode_of_flight, wind_speed, direction_drone_wind, speed_drone])
+                    if QuadController.DEBUG:
+                        print("Data Collection",
+                        "\nWind Direction:", direction_drone_wind,
+                        "\nMode of Flight:", mode_of_flight,
+                        )
+                    file.close()
+                time.sleep(1)  # Wait for 1 second
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
-        # Adjust limits
-        self.position_ax1.relim()
-        self.position_ax1.autoscale_view()
-        self.power_ax2.relim()
-        self.power_ax2.autoscale_view()
-
-        self.fig.canvas.draw()
-        plt.pause(0.1)
-        self.fig.canvas.flush_events()
 
     # ############## #
     # Motion Control #
@@ -244,8 +256,8 @@ class QuadController:
     def drone_motion_control_alt(self, altitude_control_signal):
         """Assigns a set velocity for the drones to reach their desired destination. """
         #for index, drone_name in enumerate(self.drone_names_list):
-        drone_name = "Drone1"
-        self.airsim_client.moveByVelocityAsync(17, 0, altitude_control_signal[0], 0.1, vehicle_name=drone_name) # not working
+        drone_name = "Drone1" #  altitude_control_signal[0]
+        self.airsim_client.moveByVelocityAsync(0, 0, altitude_control_signal[0], 0.1, vehicle_name=drone_name) # not working
         
         #worker_thread = Thread(target=self.drone_data_collection)
         #worker_thread.start()
@@ -269,8 +281,8 @@ class QuadController:
 
     def altitude_controller(self):
         # Plotting Setup
-        plt.ion()
-        plt.grid(True)
+        #plt.ion()
+        #plt.grid(True)
         #self.fig, (self.position_ax1, self.power_ax2) = plt.subplots(2,1)
         #self.iteration_time_step, self.position_data, self.power_data = [], [], []
         #self.line1, = self.position_ax1.plot([], [], 'r-', animated=True)
@@ -291,6 +303,13 @@ class QuadController:
         p_gain = 1
         d_gain = 1
         #self.takeoff_swarm()
+        
+        # Begin Data Recording
+        # Create and start the data collection thread
+        data_thread = Thread(target=self.save_data_to_csv)
+        data_thread.daemon = True  # Daemonize thread
+        data_thread.start()
+        
         while True:
             # Wait for a time 
             time.sleep(time_step)
@@ -305,22 +324,22 @@ class QuadController:
             derror = d_gain * (error/time_step)
             control_signal_altitude = perror + derror
             self.drone_motion_control_alt(control_signal_altitude)
-            power = self.drone_data_collection()
+            # power = self.drone_data_collection()
             iteration = iteration + 1
             #self.update_plot(iteration, current_drone_altitude[0], power)
             
             #plt.clf()
             # Power
-            plt.scatter(iteration, power, label='Power Consumption Hover (Watts)', color='red')
+            #plt.scatter(iteration, power, label='Power Consumption Hover (Watts)', color='red')
             #plt.scatter(5, desired_altitude[0], label='Desired Agent Altitude', color='blue')
             #plt.scatter(current_swarm_centroid[0], current_swarm_centroid[1], label='Current Centroid', color='green')
             #plt.scatter(reference_centroid[0], reference_centroid[1], label='Desired Centroid', color='black')
             #plt.xlim(-25, 25)  # Adjust the x-axis limits if needed
             #plt.ylim(-25, 25)  # Adjust the y-axis limits if needed
-            plt.xlabel('Iteration')
-            plt.ylabel('Power Consumption Watts')
-            plt.title('Power Consumption')
-            plt.grid(True)
+            #plt.xlabel('Iteration')
+            #plt.ylabel('Power Consumption Watts')
+            #plt.title('Power Consumption')
+            #plt.grid(True)
             # Position
             #plt.scatter(5,  current_drone_altitude[0], label='Current Agent Altitude', color='red')
             #plt.scatter(5, desired_altitude[0], label='Desired Agent Altitude', color='blue')
@@ -332,8 +351,8 @@ class QuadController:
             #plt.ylabel('Y Position')
             #plt.title('Agent Positions (Iteration {})'.format(iteration))
             #plt.grid(True)
-            plt.draw()
-            plt.pause(0.1)
+            #plt.draw()
+            #plt.pause(0.1)
 
 
 if __name__ == "__main__":
