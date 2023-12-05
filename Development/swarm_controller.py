@@ -4,11 +4,15 @@ import airsim
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from scipy.optimize import linear_sum_assignment
-from pyorca import Agent, get_avoidance_velocity, orca, normalized, perp
+from threading import Thread
+from datetime import datetime
+import csv
+# from scipy.optimize import linear_sum_assignment
+from pyorca import Agent, get_avoidance_velocity, orca# normalized, perp
 
 import decision_maker as dm
-
+from wind_model import WindModel
+from DroneSwarmEnergyModel import DroneSwarmPowerModel 
 
 class SwarmController:
     
@@ -16,11 +20,15 @@ class SwarmController:
 
     def __init__(self, swarm_size):
         self.airsim_client = airsim.MultirotorClient()
+        self.airsim_data_collection_client = airsim.MultirotorClient()
         self.swarm_size = swarm_size
         self.drone_name_list = self.airsim_client.listVehicles()
         self.max_velocity = 16
         self.initial_position = np.array([])
         self.flight_operation_altitude = -5 # NED Z direction altitude
+        wind_vector = [0,-1,0] #(NED), East (0,1,0), North (1,0,0), West (0,-1,0), South (-1, 0, 0)
+        # self.wind_direction = "East+" 
+        self.wind = WindModel(wind_vector)
         
         # Drone setup
         self.airsim_setup()
@@ -106,17 +114,17 @@ class SwarmController:
         desired_final_positions_K = None
         if desired_formation_id == 1:
             desired_final_positions_K = np.array([  
-                                      [2, 0, -5], # Drone 1
-                                      [0, 0, -5],
-                                      [0, 2, -5],
-                                      [2, 2, -5]
+                                      [2, 0, self.flight_operation_altitude], # Drone 1
+                                      [0, 0, self.flight_operation_altitude],
+                                      [0, 2, self.flight_operation_altitude],
+                                      [2, 2, self.flight_operation_altitude]
                                     ])
         elif desired_formation_id == 2:
             desired_final_positions_K = np.array([  
                                 [0, 0, self.flight_operation_altitude], # Drone 1
-                                [10, 0, self.flight_operation_altitude],
-                                [20, 0, self.flight_operation_altitude],
-                                [30, 0, self.flight_operation_altitude]
+                                [2, 0, self.flight_operation_altitude],
+                                [4, 0, self.flight_operation_altitude],
+                                [6, 0, self.flight_operation_altitude]
                             ])
         return desired_final_positions_K
     
@@ -232,7 +240,130 @@ class SwarmController:
             
             print("New Velocity", new_vels)
         return new_vels
+    
+    # ############### #
+    # Data Collection #
+    # ############### #
+
+    def copy_drone_swarm_data(self):
+        """ 
+            Copies data of current drone swarm to be used by power model.
+            This is to prevent blocking slow down in the control system.
+            General Structure:
+                drone_state_dict["drone"] = {
+                                        "MultiRotorState": multirotor_state,
+                                        "RotorState": rotor_state_info,
+                                        "PoseWFNED": drone_pose_WFNED,
+                                        "AirDensity": air_density
+                                        }
+        """
+        multirotor_states = None
+        rotor_states = None
+        drone_pose_WFNED = None
+        air_density = None        
+        drone_state_dict = {}
+        for drone in self.drone_names_list:
+            multirotor_state = self.airsim_data_collection_client.getMultirotorState(vehicle_name=drone)
+            rotor_state_info = self.airsim_data_collection_client.getRotorStates(vehicle_name=drone)
+            drone_pose_WFNED = self.airsim_data_collection_client.simGetObjectPose(drone)
+            air_density = self.airsim_data_collection_client.simGetGroundTruthEnvironment(drone).air_density
+            drone_state_dict[drone] = {
+                                        "MultiRotorState": multirotor_state,
+                                        "RotorState": rotor_state_info,
+                                        "PoseWFNED": drone_pose_WFNED,
+                                        "AirDensity": air_density
+                                        }
+        return drone_state_dict            
+
+
+    def detect_swarm_mode_of_flight(self, drone_data):
+        mean_velocity = np.array([0.0,0.0,0.0])
+        drone_list_length = len(self.drone_names_list)
+        for drone_name in self.drone_names_list:
+            drone_data[drone_name] 
+            kinematics = drone_data[drone_name]['MultiRotorState'].kinematics_estimated
+            mean_velocity += np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
+        mean_velocity = mean_velocity/drone_list_length
         
+        if SwarmController.DEBUG:
+            print(
+                "Flight Mode",
+                "\nMean Velocity:", mean_velocity
+            )
+
+        # Check the mode of flight the drones are in
+        # if North (x), East (y) average is less than 0.15 m/s then we say we are hovering, we could also add position has not changed a lot as well
+        if abs(mean_velocity[0]) == 0 and abs(mean_velocity[1]) == 0:
+            return "Hover"
+        else:
+            return "Flight"
+    
+
+   # def drone_data_collection(self):
+    #    """ Prints out data to the console of Drone1. """
+        #drone_name = "Drone1"
+        #multirotor_state = self.airsim_client.getMultirotorState(vehicle_name=drone_name)
+        #rotor_state_info = self.airsim_client.getRotorStates(vehicle_name=drone_name)
+        #drone_pose_WFNED = self.airsim_client.simGetObjectPose(drone_name)
+        
+        
+        # This Power Calculation should be executed once a second
+        #copied_airsim_state_data = self.copy_drone_swarm_data()
+        # State: Hover or Flight
+        #power_calculation_thread = Thread(target=dpm.power_model, args=("Flight", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data))
+        #power_calculation_thread.start()
+        #power_usage = dpm.swarm_power_consumption_model("Hover", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data)
+       
+        #return power_usage
+        #print("MultiRotor State Information:", multirotor_state)
+        #print("************************************************\n")
+        #print("Rotor State Information:", rotor_state_info, "\n")
+        #print("**********************************************************")
+        #print("WNED of drone", drone_pose_WFNED, "\n")
+        #print("**********************************************************")
+        # print("Drone Energy Usage in Watts", power_usage, "\n")
+        #print("**********************************************************")
+   
+    
+    def save_data_to_csv(self):
+        # Get current date and time
+        current_time = datetime.now()
+        # Format the time in a file-friendly format (e.g., '2023-03-21_15-30-00')
+        timestamp = current_time.strftime('%Y-%m-%d_%H-%M-%S')
+        filename = f'data_log_{timestamp}.csv'
+        dpm = DroneSwarmPowerModel()
+        try:
+            while True:
+                with open(filename, 'a+', newline='') as file:
+                    writer = csv.writer(file)
+                    if file.tell() == 0:
+                        writer.writerow(['Time', 'Power (Watts)', 'Flight Mode', 'Wind Speed (m/s)', 'Wind Direction (NESW)', 'Velocity m/s'])  # Writing header
+            
+                    # Data collection
+                    current_time = time.time()
+                    drone_data = self.copy_drone_swarm_data()
+                
+                    kinematics = drone_data["Drone1"]['MultiRotorState'].kinematics_estimated
+                    velocity_drone_vector = np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
+                    speed_drone = np.linalg.norm(velocity_drone_vector)
+                    direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", drone_data)
+                    # direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, drone_data)
+                    mode_of_flight = self.detect_swarm_mode_of_flight(drone_data)
+                    wind_vector = self.wind.get_wind_vector()
+                    wind_speed = np.linalg.norm(wind_vector)
+                    power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, "Drone1", drone_data)
+                
+                    # Record Data
+                    writer.writerow([current_time, power_usage, mode_of_flight, wind_speed, direction_drone_wind, speed_drone])
+                    if SwarmController.DEBUG:
+                        print("Data Collection",
+                        "\nWind Direction:", direction_drone_wind,
+                        "\nMode of Flight:", mode_of_flight,
+                        )
+                    file.close()
+                time.sleep(1)  # Wait for 1 second
+        except Exception as e:
+            print(f"An error occurred: {e}")  
 
     # Controllers
 
@@ -267,6 +398,12 @@ class SwarmController:
         # Decision Maker
         decision_maker = dm.DecisionMaker(self.swarm_size)
         decision_maker.swarm_position_selection()
+        
+        # Begin Data Recording
+        # Create and start the data collection thread
+        data_thread = Thread(target=self.save_data_to_csv)
+        data_thread.daemon = True  # Daemonize thread
+        data_thread.start()
         
         # Once all airborne formation controller will take over
         while True:

@@ -6,6 +6,9 @@ import os
 import numpy as np
 import swarm_controller as sc
 
+from wind_model import WindModel
+from DroneSwarmEnergyModel import DroneSwarmPowerModel 
+
 
 class Main:
     
