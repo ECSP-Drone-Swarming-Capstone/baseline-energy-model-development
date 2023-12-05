@@ -38,7 +38,7 @@ class Main:
         # Initialize Decision Making
 
         # Initialize Controller
-        self.formation_controller = sc(self.airsim_client, self.swarm_drone_names, self.swarm_size)
+        self.formation_controller = sc(self.swarm_drone_names, self.swarm_size)
         
 
     def airsim_setup(self):
