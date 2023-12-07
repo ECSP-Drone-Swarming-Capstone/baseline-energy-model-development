@@ -86,3 +86,5 @@ class WindModel:
 
     def get_wind_vector(self):
         return self.wind_vector
+    
+    

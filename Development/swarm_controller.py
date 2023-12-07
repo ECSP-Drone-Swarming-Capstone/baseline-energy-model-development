@@ -9,6 +9,7 @@ from datetime import datetime
 import csv
 # from scipy.optimize import linear_sum_assignment
 from pyorca import Agent, get_avoidance_velocity, orca# normalized, perp
+from queue import Queue
 
 import decision_maker as dm
 from wind_model import WindModel
@@ -26,9 +27,10 @@ class SwarmController:
         self.max_velocity = 16
         self.initial_position = np.array([])
         self.flight_operation_altitude = -5 # NED Z direction altitude
-        wind_vector = [0,-1,0] #(NED), East (0,1,0), North (1,0,0), West (0,-1,0), South (-1, 0, 0)
+        wind_vector = [5,0,0] #(NED), East (0,1,0), North (1,0,0), West (0,-1,0), South (-1, 0, 0)
         # self.wind_direction = "East+" 
         self.wind = WindModel(wind_vector)
+        self.path = np.array([])
         
         # Drone setup
         self.airsim_setup()
@@ -94,39 +96,117 @@ class SwarmController:
                                            # if possible but also assign quads in posiitons
         laplacian = None
         if formation_id == 1:
-            laplacian = np.array([
+            #laplacian = np.array([
+            #        [2, -1, -1],
+            #        [-1, 2, 0],
+            #        [-1, 0, 2]
+            #    ])
+            laplacian = np.array([ # Square
                     [2, -1, -1, 0],
                     [-1, 2, 0, -1],
                     [-1, 0, 2, -1],
                     [0, -1, -1, 2]
                 ])
-        elif formation_id == 2:
+        elif formation_id == 2: # Front
                 laplacian = np.array([
-                    [1, -1, 0, 0],
-                    [-1, 2, -1, 0],
-                    [0, -1, 2, -1],
-                    [0, 0, -1, 1]
+                    [1, -1, 0, 0, 0],
+                    [-1, 2, -1, 0, 0],
+                    [0, -1, 2, -1, 0],
+                    [0, 0, -1, 2, -1],
+                    [0, 0, 0, -1, 1]
                 ])
+        elif formation_id == 3: # Echelon
+                laplacian = np.array([
+                    [1, -1, 0, 0, 0],
+                    [-1, 2, -1, 0, 0],
+                    [0, -1, 2, -1, 0],
+                    [0, 0, -1, 2, -1],
+                    [0, 0, 0, -1, 1]
+                ])
+        elif formation_id == 4: # Diamond
+                laplacian = np.array([
+                    [4, -1, -1, -1, -1],
+                    [-1, 1, 0, 0, 0],
+                    [-1, 0, 1, 0, 0],
+                    [-1, 0, 0, 1, 0],
+                    [-1, 0, 0, 0, 1]
+                ])
+        elif formation_id == 5: # Column
+                laplacian = np.array([
+                    [1, -1, 0, 0, 0],
+                    [-1, 2, -1, 0, 0],
+                    [0, -1, 2, -1, 0],
+                    [0, 0, -1, 2, -1],
+                    [0, 0, 0, -1, 1]
+                ])
+        elif formation_id == 6: # Vee
+                laplacian = np.array([
+                    [2, -1, -1, 0, 0],
+                    [-1, 2, 0, -1, 0],
+                    [-1, 0, 2, 0, -1],
+                    [0, -1, 0, 1, 0],
+                    [0, 0, -1, 0, 1]
+                ])
+                #laplacian = np.array([
+                #    [2, -1, -1],
+                #    [-1, 2, 0],
+                #    [-1, 0, 2]
+                #])
+                
         return laplacian
     
     
     def get_desired_position(self, desired_formation_id):
         desired_final_positions_K = None
-        if desired_formation_id == 1:
+        scale = 1
+        if desired_formation_id == 1: # Square
             desired_final_positions_K = np.array([  
                                       [2, 0, self.flight_operation_altitude], # Drone 1
                                       [0, 0, self.flight_operation_altitude],
                                       [0, 2, self.flight_operation_altitude],
                                       [2, 2, self.flight_operation_altitude]
                                     ])
-        elif desired_formation_id == 2:
+        elif desired_formation_id == 2: # Front
             desired_final_positions_K = np.array([  
                                 [0, 0, self.flight_operation_altitude], # Drone 1
                                 [2, 0, self.flight_operation_altitude],
                                 [4, 0, self.flight_operation_altitude],
-                                [6, 0, self.flight_operation_altitude]
+                                [6, 0, self.flight_operation_altitude],
+                                [8, 0, self.flight_operation_altitude]
                             ])
-        return desired_final_positions_K
+        elif desired_formation_id == 3: # Echelon
+            desired_final_positions_K = np.array([  
+                                [0, 0, self.flight_operation_altitude], # Drone 1
+                                [2, 2, self.flight_operation_altitude],
+                                [4, 4, self.flight_operation_altitude],
+                                [6, 6, self.flight_operation_altitude],
+                                [8, 8, self.flight_operation_altitude]
+                            ])  
+        elif desired_formation_id == 4: # Diamond
+            desired_final_positions_K = np.array([  
+                                [0, 0, self.flight_operation_altitude], # Drone 1
+                                [0, 2, self.flight_operation_altitude],
+                                [2, 0, self.flight_operation_altitude],
+                                [0, -2, self.flight_operation_altitude],
+                                [-2, 0, self.flight_operation_altitude]
+                            ])
+        elif desired_formation_id == 5: # Column
+            desired_final_positions_K = np.array([  
+                                [0, 0, self.flight_operation_altitude], # Drone 1
+                                [0, 2, self.flight_operation_altitude],
+                                [0, 4, self.flight_operation_altitude],
+                                [0, 6, self.flight_operation_altitude],
+                                [0, 8, self.flight_operation_altitude]
+                            ])
+        elif desired_formation_id == 6: # Vee
+            desired_final_positions_K = np.array([  
+                                [0, 0, self.flight_operation_altitude], # Drone 1
+                                [2, -2, self.flight_operation_altitude],
+                                [-2, -2, self.flight_operation_altitude],
+                                [4, -4, self.flight_operation_altitude],
+                                [-4, -4, self.flight_operation_altitude]
+                            ])
+        return scale * desired_final_positions_K
     
     # Motion Control Commands that execute actions to the drones
 
@@ -140,13 +220,19 @@ class SwarmController:
             zv = drone_new_velocity[2] # altitude_control_input[index]
             speed = np.linalg.norm(drone_new_velocity)
             print("command velocity vector: ", xv, yv, zv, "Speed is", speed)
-            self.airsim_client.moveByVelocityAsync(xv, yv, zv, 0.1, vehicle_name=drone_name) 
+            yaw_mode = airsim.YawMode(is_rate=False, yaw_or_rate=0) 
+            self.airsim_client.moveByVelocityAsync(xv, yv, zv, 0.1, vehicle_name=drone_name, yaw_mode=yaw_mode) 
 
 
     def takeoff_swarm(self):
         print(self.drone_names_list)
+        m = []
         for drone_name in self.drone_names_list:
-            self.airsim_client.takeoffAsync(vehicle_name=drone_name).join()    
+            h = self.airsim_client.takeoffAsync(vehicle_name=drone_name)  
+            m.append(h)
+        
+        for i in m:
+            i.join()  
 
     # Check Functions
 
@@ -200,7 +286,7 @@ class SwarmController:
         return future_positions
     
     
-    def detect_collisions(self, future_positions, collision_threshold): # 1.5
+    def detect_collisions(self, future_positions, collision_threshold): # 1.2
         potential_collisions = []
         for drone1, pos1 in future_positions.items():
             for drone2, pos2 in future_positions.items():
@@ -214,8 +300,8 @@ class SwarmController:
     def collision_avoidance_new_velocities(self, control_signal, current_position):
         # Get Data For Agents
         agents = []
-        max_speed = 15 # m/s
-        radius = 1 # meter
+        max_speed = 17 # m/s
+        radius = 0.5 # meter
         print("Collision Avoidance Values")
         self.get_drone_velocity
         for index, drone_name in enumerate(self.drone_names_list):
@@ -297,32 +383,6 @@ class SwarmController:
             return "Hover"
         else:
             return "Flight"
-    
-
-   # def drone_data_collection(self):
-    #    """ Prints out data to the console of Drone1. """
-        #drone_name = "Drone1"
-        #multirotor_state = self.airsim_client.getMultirotorState(vehicle_name=drone_name)
-        #rotor_state_info = self.airsim_client.getRotorStates(vehicle_name=drone_name)
-        #drone_pose_WFNED = self.airsim_client.simGetObjectPose(drone_name)
-        
-        
-        # This Power Calculation should be executed once a second
-        #copied_airsim_state_data = self.copy_drone_swarm_data()
-        # State: Hover or Flight
-        #power_calculation_thread = Thread(target=dpm.power_model, args=("Flight", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data))
-        #power_calculation_thread.start()
-        #power_usage = dpm.swarm_power_consumption_model("Hover", "Vee", self.wind_vector,"East+", self.drone_names_list, copied_airsim_state_data)
-       
-        #return power_usage
-        #print("MultiRotor State Information:", multirotor_state)
-        #print("************************************************\n")
-        #print("Rotor State Information:", rotor_state_info, "\n")
-        #print("**********************************************************")
-        #print("WNED of drone", drone_pose_WFNED, "\n")
-        #print("**********************************************************")
-        # print("Drone Energy Usage in Watts", power_usage, "\n")
-        #print("**********************************************************")
    
     
     def save_data_to_csv(self):
@@ -342,19 +402,68 @@ class SwarmController:
                     # Data collection
                     current_time = time.time()
                     drone_data = self.copy_drone_swarm_data()
+                    drone_names_list = drone_data.keys()
+                    kinematics = drone_data["Drone1"]['MultiRotorState'].kinematics_estimated
+                    velocity_drone_vector = np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
+                    speed_drone = np.linalg.norm(velocity_drone_vector)
+                    #direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", drone_data)
+                    direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, drone_data)
+                    mode_of_flight = self.detect_swarm_mode_of_flight(drone_data)
+                    wind_vector = self.wind.get_wind_vector()
+                    wind_speed = np.linalg.norm(wind_vector)
+                    #power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, "Drone1", drone_data)
+                    print("Power is Dead ------------------------------------------------------------------------------------------------------")
+                    power_usage = dpm.swarm_power_consumption_model( mode_of_flight, "Vee", wind_vector, direction_swarm_wind, drone_names_list, drone_data)
                 
+                    # Record Data
+                    writer.writerow([current_time, power_usage, mode_of_flight, wind_speed, direction_swarm_wind, speed_drone])
+                    if SwarmController.DEBUG:
+                        print("Data Collection",
+                        "\nWind Direction:", direction_swarm_wind,
+                        "\nMode of Flight:", mode_of_flight,
+                        )
+                    file.close()
+                time.sleep(2)  # Wait for 1 second
+        except Exception as e:
+            print(f"An error occurred: {e}")  
+
+
+    def save_individual_drone_data_to_csv(self):
+        # Get current date and time
+        current_time = datetime.now()
+        # Format the time in a file-friendly format (e.g., '2023-03-21_15-30-00')
+        timestamp = current_time.strftime('%Y-%m-%d_%H-%M-%S')
+        filename = f'data_log_{timestamp}.csv'
+        dpm = DroneSwarmPowerModel()
+        try:
+            while True:
+                with open(filename, 'a+', newline='') as file:
+                    writer = csv.writer(file)
+                    if file.tell() == 0:
+                        writer.writerow(['Time', 'Net Power (Watts)', 'Flight Mode', 'Wind Speed (m/s)', 'Wind Direction (NESW)', 'Velocity m/s'])  # Writing header
+            
+                    # Data collection
+                    
+                    current_time = time.time()
+                    drone_data = self.copy_drone_swarm_data()
+                    drone_names_list = drone_data.keys()
                     kinematics = drone_data["Drone1"]['MultiRotorState'].kinematics_estimated
                     velocity_drone_vector = np.array([kinematics.linear_velocity.x_val, kinematics.linear_velocity.y_val, kinematics.linear_velocity.z_val])
                     speed_drone = np.linalg.norm(velocity_drone_vector)
                     direction_drone_wind = self.wind.get_direction_of_wind_relative_to_drone("Drone1", drone_data)
-                    # direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, drone_data)
+                    #direction_swarm_wind = self.wind.get_direction_of_wind_relative_to_swarm(self.drone_names_list, drone_data)
                     mode_of_flight = self.detect_swarm_mode_of_flight(drone_data)
                     wind_vector = self.wind.get_wind_vector()
                     wind_speed = np.linalg.norm(wind_vector)
-                    power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, "Drone1", drone_data)
+                    net_power_usage = 0
+                    for drone in drone_names_list:
+                        power_usage = dpm.drone_power_consumption_model(mode_of_flight, wind_vector, direction_drone_wind, drone, drone_data)
+                        net_power_usage += power_usage
+                    print("Power is Dead ------------------------------------------------------------------------------------------------------")
+                    # power_usage = dpm.swarm_power_consumption_model( mode_of_flight, "Vee", wind_vector, direction_swarm_wind, drone_names_list, drone_data)
                 
                     # Record Data
-                    writer.writerow([current_time, power_usage, mode_of_flight, wind_speed, direction_drone_wind, speed_drone])
+                    writer.writerow([current_time, net_power_usage, mode_of_flight, wind_speed, direction_drone_wind, speed_drone])
                     if SwarmController.DEBUG:
                         print("Data Collection",
                         "\nWind Direction:", direction_drone_wind,
@@ -363,9 +472,40 @@ class SwarmController:
                     file.close()
                 time.sleep(1)  # Wait for 1 second
         except Exception as e:
-            print(f"An error occurred: {e}")  
+            print(f"An error occurred: {e}") 
 
     # Controllers
+    def simple_drone_control(self):
+        distance_to_travel = np.array([100, 0, 0]) # meters 
+        
+        # Begin Data Recording
+        # Create and start the data collection thread
+        data_thread = Thread(target=self.save_data_to_csv)
+        data_thread.daemon = True  # Daemonize thread
+        data_thread.start()        
+
+        initial_positions = self.get_current_drone_positions()
+        desired_positions = initial_positions + distance_to_travel
+        print("Desired_Positions", desired_positions)
+        moving = []
+        self.takeoff_swarm()        
+
+        for index, drone_name in enumerate(self.drone_name_list):
+            drone_desired_position = desired_positions[index]
+            v = self.airsim_client.moveToPositionAsync(drone_desired_position[0], drone_desired_position[1], self.flight_operation_altitude, 5, vehicle_name=drone_name)
+            moving.append(v)
+        
+        for item in moving:
+            item.join()
+        data_thread.join()
+
+
+    def linear_motion_plan(self, distance, dist_step, current_ref):
+        path = Queue()
+        for x in range(0, distance, dist_step):
+            path.put( current_ref + np.array([ 0, x, 0 ]) )
+        return path      
+
 
     def formation_control_loop(self):
         """
@@ -382,40 +522,69 @@ class SwarmController:
         # Controller Gains
         gain_P = 1.0
         p_gain = 1
-        d_gain = 1
+        # d_gain = 1
         centroid_gain_P = 1.0
         
+        # Decision Maker
+        decision_maker = dm.DecisionMaker(self.swarm_size)
+        
+
         # Formation Parameters
-        desired_formation_id = 2
-        desired_final_positions_K = self.get_desired_position(desired_formation_id)
-        reference_centroid = np.array([np.mean(desired_final_positions_K[:, 0]), np.mean(desired_final_positions_K[:, 1]), self.flight_operation_altitude ])
+        desired_formation_id = 6
+        desired_final_positions_K = decision_maker.swarm_position_selection(desired_formation_id) # self.get_desired_position(desired_formation_id)
+        reference_centroid = np.array([np.mean(desired_final_positions_K[:, 0]), np.mean(desired_final_positions_K[:, 1]), self.flight_operation_altitude])
        
         # Start Simulation #
 
         # Have drones get airborne
         self.takeoff_swarm()
+
+        # Motion Plan
+        self.path = self.linear_motion_plan(100, 10, reference_centroid)
         
-        # Decision Maker
-        decision_maker = dm.DecisionMaker(self.swarm_size)
-        decision_maker.swarm_position_selection()
-        
+        # Collision Avoidance Parameters
+        delta_t = 0.025
+        collision_distance = 1.25
+
         # Begin Data Recording
         # Create and start the data collection thread
         data_thread = Thread(target=self.save_data_to_csv)
         data_thread.daemon = True  # Daemonize thread
         data_thread.start()
         
+        # Keep Track of Trajectory
+        previous_target = desired_final_positions_K
+
         # Once all airborne formation controller will take over
         while True:
             # Control System Delay
             time.sleep(time_step)
             
             # Formation transformation should be decided here 
-            #if iteration == 40: 
+            #if iteration == 50: 
             #    desired_formation_id = 1
             #    desired_final_positions_K = self.get_desired_position(desired_formation_id)
-            #    reference_centroid = np.array([np.mean(desired_final_positions_K[:, 0]), np.mean(desired_final_positions_K[:, 1]) ])
-            
+            #    reference_centroid = np.array([0,20, self.flight_operation_altitude]) #np.array([np.mean(desired_final_positions_K[:, 0]), np.mean(desired_final_positions_K[:, 1]), self.flight_operation_altitude ])
+                #current_swarm_centroid = np.array([np.mean(position[:, 0]), np.mean(position[:, 1]), np.mean(position[:, 2]) ])
+                #centroid_displacement = reference_centroid - current_swarm_centroid
+                #translation = np.array([ centroid_displacement[0], centroid_displacement[1], 0 ])
+                #previous_target = previous_target + translation
+                #desired_final_positions_K = self.get_desired_position(desired_formation_id)
+            if iteration > 111:
+                desired_formation_id = 4
+                desired_final_positions_K = decision_maker.swarm_position_selection(desired_formation_id) # self.get_desired_position(desired_formation_id)
+                
+            if iteration > 100 and not self.path.empty():
+                current_swarm_centroid = np.array([np.mean(position[:, 0]), np.mean(position[:, 1]), np.mean(position[:, 2]) ])
+                if np.linalg.norm(reference_centroid - current_swarm_centroid) <= 5:
+                    reference_centroid = self.path.get()
+                    print("new_point:", reference_centroid)
+                
+                    
+                
+            #if iteration == 40:
+            #    reference_centroid = np.array([0,10, self.flight_operation_altitude])
+
             # Calculate Delta between current position - desired_position
             position = self.get_current_drone_positions()
             displacement = position - desired_final_positions_K
@@ -431,25 +600,30 @@ class SwarmController:
             # Centroid Tracking: enables drones to converge more accurately in desired location
             current_swarm_centroid = np.array([np.mean(position[:, 0]), np.mean(position[:, 1]), np.mean(position[:, 2]) ])
             centroid_error = reference_centroid - current_swarm_centroid
+            print("Centroid Error:", centroid_error, "=", reference_centroid, "-", current_swarm_centroid)
             
             # Compute Control Signal
             control_signal = (gain_P * tau_dot) + (centroid_gain_P * centroid_error) 
             #print("control_signal:", control_signal)
             
-            # Collision Avoidance 
-            new_control_signals = self.collision_avoidance_new_velocities(control_signal, position)
+            # Collision Avoidance
+            predicted_position = self.predict_future_positions(delta_t) 
+            collisions = self.detect_collisions(predicted_position, collision_distance)
+            if len(collisions) > 0:
+                print("Collision Detected")
+                control_signal = self.collision_avoidance_new_velocities(control_signal, position)
             
             # Move swarm to desired location
-            self.drone_motion_control(new_control_signals)
-            
+            # self.drone_motion_control(new_control_signals)
+            self.drone_motion_control(control_signal)
             iteration = iteration + 1
             plt.clf()
             plt.scatter(position[:, 0], position[:, 1], label='Current Agent Positions', color='red')
-            plt.scatter(desired_final_positions_K[:, 0], desired_final_positions_K[:,1], label='Desired Agent Positions', color='blue')
+            plt.scatter(desired_final_positions_K[:, 0] + reference_centroid[0], desired_final_positions_K[:,1] + reference_centroid[1], label='Desired Agent Positions', color='blue')
             plt.scatter(current_swarm_centroid[0], current_swarm_centroid[1], label='Current Centroid', color='green')
             plt.scatter(reference_centroid[0], reference_centroid[1], label='Desired Centroid', color='black')
-            plt.xlim(-25, 25)  # Adjust the x-axis limits if needed
-            plt.ylim(-25, 25)  # Adjust the y-axis limits if needed
+            plt.xlim(-30, 30)  # Adjust the x-axis limits if needed
+            plt.ylim(-30, 30)  # Adjust the y-axis limits if needed
             plt.xlabel('X Position')
             plt.ylabel('Y Position')
             plt.title('Agent Positions (Iteration {})'.format(iteration))
@@ -462,6 +636,7 @@ class SwarmController:
    
         
 if __name__ == "__main__":
-    swarm_size = 4
+    swarm_size = 5
     sc = SwarmController(swarm_size)
     sc.formation_control_loop()
+    # sc.simple_drone_control()
